@@ -52,7 +52,7 @@ librenms_megaraid_enable=0
 # disabling this will result in the web interface being disabled
 MONGO_ENABLE=1
 
-DIE_VERSION="3.07"
+DIE_VERSION="3.08"
 
 TOR_SOCKET_TIMEOUT="60"
 
@@ -735,23 +735,29 @@ function install_yara() {
     git clone --recursive https://github.com/VirusTotal/yara-python
     cd yara-python
     # checkout tag v4.2.3 to work around broken master branch
-    git checkout tags/v4.2.3
+    # git checkout tags/v4.2.3
     # sometimes it requires to have a copy of YARA inside of yara-python for proper compilation
     # git clone --recursive https://github.com/VirusTotal/yara
     # Temp workarond to fix issues compiling yara-python https://github.com/VirusTotal/yara-python/issues/212
     # partially applying PR https://github.com/VirusTotal/yara-python/pull/210/files
-    sed -i "191 i \ \ \ \ # Needed to build tlsh'\n    module.define_macros.extend([('BUCKETS_128', 1), ('CHECKSUM_1B', 1)])\n    # Needed to build authenticode parser\n    module.libraries.append('ssl')" setup.py
-    python3 setup.py build --enable-cuckoo --enable-magic --enable-profiling --enable-dotnet
+    # sed -i "191 i \ \ \ \ # Needed to build tlsh'\n    module.define_macros.extend([('BUCKETS_128', 1), ('CHECKSUM_1B', 1)])\n    # Needed to build authenticode parser\n    module.libraries.append('ssl')" setup.py
+    python3 setup.py build --enable-cuckoo --enable-magic --enable-profiling
     cd ..
     # for root
     pip3 install ./yara-python
+    if [ -d yara-python ]; then
+        rm -rf yara-python
+    fi
 
     if id "cape" >/dev/null 2>&1; then
         cd /opt/CAPEv2/
         sudo -u cape poetry run extra/poetry_yara_installer.sh
         cd -
     fi
-    rm -r yara-python
+    if [ -d yara-python ]; then
+        rm -rf yara-python
+    fi
+
 }
 
 function install_mongo(){
@@ -812,7 +818,7 @@ Group=mongodb
 # StandardOutput=syslog
 # StandardError=syslog
 SyslogIdentifier=mongodb
-LimitNOFILE=65536
+LimitNOFILE=1048576
 [Install]
 WantedBy=multi-user.target
 EOF
@@ -1016,6 +1022,8 @@ EOF
     sudo checkinstall -D --pkgname=passivedns --default
 
     pip3 install unicorn capstone
+
+    sed -i 's/APT::Periodic::Unattended-Upgrade "1";/APT::Periodic::Unattended-Upgrade "0";/g' /etc/apt/apt.conf.d/20auto-upgrades
 
 }
 
@@ -1248,7 +1256,7 @@ function install_volatility3() {
     vol_path=$(python3 -c "import volatility3.plugins;print(volatility3.__file__.replace('__init__.py', 'symbols/'))")
     cd $vol_path || return
     wget https://downloads.volatilityfoundation.org/volatility3/symbols/windows.zip -O windows.zip
-    unzip windows.zip
+    unzip -o windows.zip
     rm windows.zip
     chown "${USER}:${USER}" $vol_path -R
 }
@@ -1317,8 +1325,7 @@ function install_guacamole() {
 
 function install_DIE() {
     apt install libqt5opengl5 libqt5script5 libqt5scripttools5 libqt5sql5 -y
-    wget "https://github.com/horsicq/DIE-engine/releases/download/${DIE_VERSION}/die_${DIE_VERSION}_Ubuntu_${UBUNTU_VERSION}_amd64.deb" -O DIE.deb
-    dpkg -i DIE.deb
+    wget "https://github.com/horsicq/DIE-engine/releases/download/${DIE_VERSION}/die_${DIE_VERSION}_Ubuntu_${UBUNTU_VERSION}_amd64.deb" -O DIE.deb && dpkg -i DIE.deb
 }
 
 # Doesn't work ${$1,,}
