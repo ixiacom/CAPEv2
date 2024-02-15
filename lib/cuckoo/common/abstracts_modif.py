@@ -3,8 +3,8 @@
 # This file is part of Cuckoo Sandbox - http://www.cuckoosandbox.org
 # See the file 'docs/LICENSE' for copying permission.
 
-import json
 import datetime
+import json
 import logging
 import os
 import socket
@@ -714,7 +714,7 @@ class Signature:
     enabled = True
     minimum = None
     maximum = None
-    #MV: commented 2 lines below
+    # MV: commented 2 lines below
     ttps = []
     mbcs = []
     markcount = 50
@@ -744,26 +744,26 @@ class Signature:
         self.matched = False
 
         self.safelistprocs = [
-        "iexplore.exe",
-        "firefox.exe",
-        "chrome.exe",
-        "safari.exe",
-        "acrord32.exe",
-        "acrord64.exe",
-        "wordview.exe",
-        "winword.exe",
-        "excel.exe",
-        "powerpnt.exe",
-        "outlook.exe",
-        "mspub.exe"
-    ]
+            "iexplore.exe",
+            "firefox.exe",
+            "chrome.exe",
+            "safari.exe",
+            "acrord32.exe",
+            "acrord64.exe",
+            "wordview.exe",
+            "winword.exe",
+            "excel.exe",
+            "powerpnt.exe",
+            "outlook.exe",
+            "mspub.exe",
+        ]
 
         # These are set during the iteration of evented signatures
         self.pid = None
         self.cid = None
         self.call = None
-        #print("INIT SIGNATURE")
-        
+        # print("INIT SIGNATURE")
+
         self._client_sids = []
         self._server_sids = []
         self.matched = False
@@ -1521,7 +1521,7 @@ class Signature:
             return self._current_call_raw_dict[name]
 
         return None
-    
+
     def get_all_sids(self):
         sids = set()
         if isinstance(self.results.get("suricata", {}), dict):
@@ -1550,15 +1550,15 @@ class Signature:
     def get_suricata_sids(self):
         sids_ips = {}
         for alert in self.results.get("suricata", {}).get("alerts", []):
-            sid = alert.get("sid",0)
+            sid = alert.get("sid", 0)
             src_ip = alert.get("srcip")
             dst_ip = alert.get("dstip")
             domains = self.results["network"].get("domains")
-            #domain_list = []
-            #for domain in self.results.get("domains",{}):
+            # domain_list = []
+            # for domain in self.results.get("domains",{}):
             #    if domain['ip'] in [src_ip,dst_ip]:
             #        domain_list.append(domain['domain'])
-            url = "" #NEED TO ADD THIS
+            url = ""  # NEED TO ADD THIS
             ips_for_sid = sids_ips.get(sid, [])
             ips_for_sid.append((src_ip, dst_ip, domains, url))
             sids_ips[sid] = ips_for_sid
@@ -1571,35 +1571,28 @@ class Signature:
         for server_sid in self._server_sids:
             for server_ip, _, domain, url in sids_ips.get(server_sid, []):
                 # matched a C&C server
-                #print(server_sid)
-                #LOG.info('%s/%s C&C Server Identified!' % (self._malware_type, self._malware_family) )
+                # print(server_sid)
+                # LOG.info('%s/%s C&C Server Identified!' % (self._malware_type, self._malware_family) )
                 # TODO/AH: pointless right now since we can't safely and correctly match to Cuckoo's mapping of fields
                 # extraction was done based on Suricata eve.json hierarchy but Cuckoo maps it differently and
                 # it's hard to certainly say which flow/hostname/url are involved without risking FPs.
-                self.mark_ioc('ip', server_ip, description=json.dumps({'domain':domain, 'url':url}))
-                self.mark_ioc('ati_malware_type', self._malware_type)
-                self.mark_ioc('ati_malware_family', self._malware_family)
+                self.mark_ioc("ip", server_ip, description=json.dumps({"domain": domain, "url": url}))
+                self.mark_ioc("ati_malware_type", self._malware_type)
+                self.mark_ioc("ati_malware_family", self._malware_family)
                 has_results = True
-                self.mark_config({
-                    "family": self._malware_family,
-                    "cnc": "%s" %(server_ip),
-                    "type": self._malware_type,
-                    "domains":domain
-                    })
+                self.mark_config(
+                    {"family": self._malware_family, "cnc": "%s" % (server_ip), "type": self._malware_type, "domains": domain}
+                )
 
         for client_sid in self._client_sids:
             for _, _, _, _ in sids_ips.get(client_sid, []):
                 # no C&C server but we did the check-in so mark the binary
-                #print(client_sid)
-                #LOG.info('%s/%s Binary Identified!' % (self._malware_type, self._malware_family) )
-                self.mark_ioc('ati_malware_type', self._malware_type)
-                self.mark_ioc('ati_malware_family', self._malware_family)
+                # print(client_sid)
+                # LOG.info('%s/%s Binary Identified!' % (self._malware_type, self._malware_family) )
+                self.mark_ioc("ati_malware_type", self._malware_type)
+                self.mark_ioc("ati_malware_family", self._malware_family)
                 has_results = True
-                self.mark_config({
-                    "family": self._malware_family,
-                    "type": self._malware_type
-                    })
-
+                self.mark_config({"family": self._malware_family, "type": self._malware_type})
 
         return has_results
 
@@ -1649,10 +1642,9 @@ class Signature:
         @raise NotImplementedError: this method is abstract.
         """
         if self.on_call_dispatch:
-           return getattr(self, "on_call_%s" % call["api"])(call, process)
+            return getattr(self, "on_call_%s" % call["api"])(call, process)
 
         raise NotImplementedError
-
 
     def on_complete(self):
         """Evented signature is notified when all API calls are done.
@@ -1679,8 +1671,8 @@ class Signature:
             if self.ati_ttps and self.description.startswith("ATI"):
                 self.description += " | MITRE ATT&CK Technique IDs: "
                 for t in self.ati_ttps:
-                    ttp_urls.append( "https://attack.mitre.org/techniques/" + t + "/" )
-                    self.description += t + ", "     
+                    ttp_urls.append("https://attack.mitre.org/techniques/" + t + "/")
+                    self.description += t + ", "
             return dict(
                 name=self.name,
                 description=self.description,
@@ -1701,18 +1693,21 @@ class Signature:
         if not isinstance(config, dict) or "family" not in config:
             raise CuckooCriticalError("Invalid call to mark_config().")
 
-        self.data.append({
-                           "type": "config",
-                           "config": config,
-                           })
+        self.data.append(
+            {
+                "type": "config",
+                "config": config,
+            }
+        )
 
     def mark(self, **kwargs):
         """Mark arbitrary data."""
         mark = {
-                "type": "generic",
-                }
+            "type": "generic",
+        }
         mark.update(kwargs)
         self.data.append(mark)
+
 
 class Report:
     """Base abstract class for reporting module."""
@@ -1859,5 +1854,3 @@ class ProtocolHandler:
 
     def handle(self):
         raise NotImplementedError
-
-

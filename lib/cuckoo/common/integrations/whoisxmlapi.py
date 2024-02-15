@@ -1,6 +1,7 @@
 import logging
 
 import requests
+
 from lib.cuckoo.common.config import Config
 
 log = logging.getLogger()

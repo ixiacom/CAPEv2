@@ -3,18 +3,18 @@
 # This file is part of Cuckoo Sandbox - http://www.cuckoosandbox.org
 # See the file 'docs/LICENSE' for copying permission.
 
-import json
 import datetime
+import json
 import logging
 import os
 import socket
 import threading
 import time
 import timeit
+import traceback
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Dict, List
-import traceback
 
 try:
     import dns.resolver
@@ -748,7 +748,6 @@ class Signature:
         self.pid = None
         self.cid = None
         self.call = None
-
 
     def statistics_custom(self, pretime, extracted: bool = False):
         """

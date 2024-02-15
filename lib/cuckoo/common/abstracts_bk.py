@@ -742,19 +742,19 @@ class Signature:
         self.matched = False
         self.marks = []
         self.safelistprocs = [
-        "iexplore.exe",
-        "firefox.exe",
-        "chrome.exe",
-        "safari.exe",
-        "acrord32.exe",
-        "acrord64.exe",
-        "wordview.exe",
-        "winword.exe",
-        "excel.exe",
-        "powerpnt.exe",
-        "outlook.exe",
-        "mspub.exe"
-    ]
+            "iexplore.exe",
+            "firefox.exe",
+            "chrome.exe",
+            "safari.exe",
+            "acrord32.exe",
+            "acrord64.exe",
+            "wordview.exe",
+            "winword.exe",
+            "excel.exe",
+            "powerpnt.exe",
+            "outlook.exe",
+            "mspub.exe",
+        ]
 
         # These are set during the iteration of evented signatures
         self.pid = None
@@ -1554,10 +1554,12 @@ class Signature:
         if not isinstance(config, dict) or "family" not in config:
             raise CuckooCriticalError("Invalid call to mark_config().")
 
-        self.marks.append({
-            "type": "config",
-            "config": config,
-        })
+        self.marks.append(
+            {
+                "type": "config",
+                "config": config,
+            }
+        )
 
     def mark(self, **kwargs):
         """Mark arbitrary data."""
@@ -1565,7 +1567,7 @@ class Signature:
             "type": "generic",
         }
         mark.update(kwargs)
-        self.marks.append(mark)    
+        self.marks.append(mark)
 
     def add_match(self, process, type, match):
         """Adds a match to the signature data.
@@ -1602,7 +1604,6 @@ class Signature:
             return getattr(self, "on_call_%s" % call["api"])(call, process)
 
         raise NotImplementedError
-
 
     def on_complete(self):
         """Evented signature is notified when all API calls are done.
@@ -1641,18 +1642,21 @@ class Signature:
         if not isinstance(config, dict) or "family" not in config:
             raise CuckooCriticalError("Invalid call to mark_config().")
 
-        self.marks.append({
-                           "type": "config",
-                           "config": config,
-                           })
+        self.marks.append(
+            {
+                "type": "config",
+                "config": config,
+            }
+        )
 
     def mark(self, **kwargs):
         """Mark arbitrary data."""
         mark = {
-                "type": "generic",
-                }
+            "type": "generic",
+        }
         mark.update(kwargs)
         self.marks.append(mark)
+
 
 class Report:
     """Base abstract class for reporting module."""
