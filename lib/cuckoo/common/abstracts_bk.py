@@ -3,7 +3,6 @@
 # This file is part of Cuckoo Sandbox - http://www.cuckoosandbox.org
 # See the file 'docs/LICENSE' for copying permission.
 
-import json
 import datetime
 import logging
 import os
@@ -14,7 +13,6 @@ import timeit
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Dict, List
-import traceback
 
 try:
     import dns.resolver
@@ -24,7 +22,6 @@ import requests
 
 from lib.cuckoo.common.config import Config
 from lib.cuckoo.common.constants import CUCKOO_ROOT
-from lib.cuckoo.common.dictionary import Dictionary
 from lib.cuckoo.common.exceptions import (
     CuckooCriticalError,
     CuckooDependencyError,
@@ -33,6 +30,7 @@ from lib.cuckoo.common.exceptions import (
     CuckooReportError,
 )
 from lib.cuckoo.common.integrations.mitre import mitre_load
+from lib.cuckoo.common.objects import Dictionary
 from lib.cuckoo.common.path_utils import path_exists
 from lib.cuckoo.common.url_validate import url as url_validator
 from lib.cuckoo.common.utils import create_folder, get_memdump_path, load_categories
@@ -366,9 +364,7 @@ class LibVirtMachinery(Machinery):
             return
 
         if not HAVE_LIBVIRT:
-            raise CuckooDependencyError(
-                "Unable to import libvirt. Ensure that you properly installed it by running: cd /opt/CAPEv2/ ; sudo -u cape poetry run extra/libvirt_installer.sh"
-            )
+            raise CuckooDependencyError("Unable to import libvirt")
 
         super(LibVirtMachinery, self).__init__()
 
@@ -719,6 +715,7 @@ class Signature:
     maximum = None
     ttps = []
     mbcs = []
+    markcount = 50
 
     # Higher order will be processed later (only for non-evented signatures)
     # this can be used for having meta-signatures that check on other lower-
@@ -743,12 +740,26 @@ class Signature:
         self.hostname2ips = {}
         self.machinery_conf = machinery_conf
         self.matched = False
+        self.marks = []
+        self.safelistprocs = [
+        "iexplore.exe",
+        "firefox.exe",
+        "chrome.exe",
+        "safari.exe",
+        "acrord32.exe",
+        "acrord64.exe",
+        "wordview.exe",
+        "winword.exe",
+        "excel.exe",
+        "powerpnt.exe",
+        "outlook.exe",
+        "mspub.exe"
+    ]
 
         # These are set during the iteration of evented signatures
         self.pid = None
         self.cid = None
         self.call = None
-
 
     def statistics_custom(self, pretime, extracted: bool = False):
         """
@@ -762,6 +773,12 @@ class Signature:
             "time": round(timediff, 3),
             "extracted": int(extracted),
         }
+
+    def has_marks(self, count=None):
+        """Returns true if this signature has one or more marks."""
+        if count is not None:
+            return len(self.marks) >= count
+        return not not self.marks
 
     def set_path(self, analysis_path):
         """Set analysis folder path.
@@ -788,6 +805,8 @@ class Signature:
 
     def yara_detected(self, name):
 
+        analysis_folder = os.path.join(CUCKOO_ROOT, "storage", "analyses", str(self.results["info"]["id"]))
+
         target = self.results.get("target", {})
         if target.get("category") in ("file", "static") and target.get("file"):
             for keyword in ("cape_yara", "yara"):
@@ -800,7 +819,7 @@ class Signature:
                     for yara_block in block[keyword]:
                         if re.findall(name, yara_block["name"], re.I):
                             # we can't use here values from set_path
-                            yield "sample", block["path"], yara_block, block
+                            yield "sample", os.path.join(analysis_folder, "selfextracted", block["sha256"]), yara_block, block
 
         for block in self.results.get("CAPE", {}).get("payloads", []) or []:
             for sub_keyword in ("cape_yara", "yara"):
@@ -812,7 +831,7 @@ class Signature:
                 for keyword in ("cape_yara", "yara"):
                     for yara_block in subblock[keyword]:
                         if re.findall(name, yara_block["name"], re.I):
-                            yield "sample", subblock["path"], yara_block, block
+                            yield "sample", os.path.join(analysis_folder, "selfextracted", block["sha256"]), yara_block, block
 
         for keyword in ("procdump", "procmemory", "extracted", "dropped"):
             if self.results.get(keyword) is not None:
@@ -835,7 +854,9 @@ class Signature:
                         for keyword in ("cape_yara", "yara"):
                             for yara_block in subblock[keyword]:
                                 if re.findall(name, yara_block["name"], re.I):
-                                    yield "sample", subblock["path"], yara_block, block
+                                    yield "sample", os.path.join(
+                                        analysis_folder, "selfextracted", subblock["sha256"]
+                                    ), yara_block, block
 
         macro_path = os.path.join(CUCKOO_ROOT, "storage", "analyses", str(self.results["info"]["id"]), "macros")
         for macroname in self.results.get("static", {}).get("office", {}).get("Macro", {}).get("info", []) or []:
@@ -1512,6 +1533,39 @@ class Signature:
             log.warning("You have provided extra arguments to the mark_call() method which does not support doing so.")
 
         self.data.append(mark)
+        self.marks.append(mark)
+
+    def mark_ioc(self, category, ioc, description=None):
+        """Mark an IOC as explanation as to why the current signature
+        matched."""
+        mark = {
+            "type": "ioc",
+            "category": category,
+            "ioc": ioc,
+            "description": description,
+        }
+
+        # Prevent duplicates.
+        if mark not in self.marks:
+            self.marks.append(mark)
+
+    def mark_config(self, config):
+        """Mark configuration from this malware family."""
+        if not isinstance(config, dict) or "family" not in config:
+            raise CuckooCriticalError("Invalid call to mark_config().")
+
+        self.marks.append({
+            "type": "config",
+            "config": config,
+        })
+
+    def mark(self, **kwargs):
+        """Mark arbitrary data."""
+        mark = {
+            "type": "generic",
+        }
+        mark.update(kwargs)
+        self.marks.append(mark)    
 
     def add_match(self, process, type, match):
         """Adds a match to the signature data.
@@ -1544,14 +1598,18 @@ class Signature:
         @param process: process doing API call.
         @raise NotImplementedError: this method is abstract.
         """
+        if self.on_call_dispatch:
+            return getattr(self, "on_call_%s" % call["api"])(call, process)
 
         raise NotImplementedError
+
 
     def on_complete(self):
         """Evented signature is notified when all API calls are done.
         @return: Match state.
         @raise NotImplementedError: this method is abstract.
         """
+
         raise NotImplementedError
 
     def run(self):
@@ -1578,6 +1636,23 @@ class Signature:
             families=self.families,
         )
 
+    def mark_config(self, config):
+        """Mark configuration from this malware family."""
+        if not isinstance(config, dict) or "family" not in config:
+            raise CuckooCriticalError("Invalid call to mark_config().")
+
+        self.marks.append({
+                           "type": "config",
+                           "config": config,
+                           })
+
+    def mark(self, **kwargs):
+        """Mark arbitrary data."""
+        mark = {
+                "type": "generic",
+                }
+        mark.update(kwargs)
+        self.marks.append(mark)
 
 class Report:
     """Base abstract class for reporting module."""

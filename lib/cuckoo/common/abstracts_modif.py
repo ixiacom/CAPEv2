@@ -14,7 +14,6 @@ import timeit
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Dict, List
-import traceback
 
 try:
     import dns.resolver
@@ -24,7 +23,6 @@ import requests
 
 from lib.cuckoo.common.config import Config
 from lib.cuckoo.common.constants import CUCKOO_ROOT
-from lib.cuckoo.common.dictionary import Dictionary
 from lib.cuckoo.common.exceptions import (
     CuckooCriticalError,
     CuckooDependencyError,
@@ -33,6 +31,7 @@ from lib.cuckoo.common.exceptions import (
     CuckooReportError,
 )
 from lib.cuckoo.common.integrations.mitre import mitre_load
+from lib.cuckoo.common.objects import Dictionary
 from lib.cuckoo.common.path_utils import path_exists
 from lib.cuckoo.common.url_validate import url as url_validator
 from lib.cuckoo.common.utils import create_folder, get_memdump_path, load_categories
@@ -366,9 +365,7 @@ class LibVirtMachinery(Machinery):
             return
 
         if not HAVE_LIBVIRT:
-            raise CuckooDependencyError(
-                "Unable to import libvirt. Ensure that you properly installed it by running: cd /opt/CAPEv2/ ; sudo -u cape poetry run extra/libvirt_installer.sh"
-            )
+            raise CuckooDependencyError("Unable to import libvirt")
 
         super(LibVirtMachinery, self).__init__()
 
@@ -717,8 +714,10 @@ class Signature:
     enabled = True
     minimum = None
     maximum = None
+    #MV: commented 2 lines below
     ttps = []
     mbcs = []
+    markcount = 50
 
     # Higher order will be processed later (only for non-evented signatures)
     # this can be used for having meta-signatures that check on other lower-
@@ -744,11 +743,43 @@ class Signature:
         self.machinery_conf = machinery_conf
         self.matched = False
 
+        self.safelistprocs = [
+        "iexplore.exe",
+        "firefox.exe",
+        "chrome.exe",
+        "safari.exe",
+        "acrord32.exe",
+        "acrord64.exe",
+        "wordview.exe",
+        "winword.exe",
+        "excel.exe",
+        "powerpnt.exe",
+        "outlook.exe",
+        "mspub.exe"
+    ]
+
         # These are set during the iteration of evented signatures
         self.pid = None
         self.cid = None
         self.call = None
+        #print("INIT SIGNATURE")
+        
+        self._client_sids = []
+        self._server_sids = []
+        self.matched = False
+        self._malware_type = None
+        self._malware_family = None
 
+    possible_marks = []
+
+    def temp_mark_call(self):
+        mark = {
+            "type": "call",
+            "pid": self.pid,
+            "cid": self.cid,
+            "call": self.call,
+        }
+        self.possible_marks.append(mark)
 
     def statistics_custom(self, pretime, extracted: bool = False):
         """
@@ -762,6 +793,12 @@ class Signature:
             "time": round(timediff, 3),
             "extracted": int(extracted),
         }
+
+    def has_marks(self, count=None):
+        """Returns true if this signature has one or more marks."""
+        if count is not None:
+            return len(self.data) >= count
+        return not not self.data
 
     def set_path(self, analysis_path):
         """Set analysis folder path.
@@ -788,6 +825,8 @@ class Signature:
 
     def yara_detected(self, name):
 
+        analysis_folder = os.path.join(CUCKOO_ROOT, "storage", "analyses", str(self.results["info"]["id"]))
+
         target = self.results.get("target", {})
         if target.get("category") in ("file", "static") and target.get("file"):
             for keyword in ("cape_yara", "yara"):
@@ -800,7 +839,7 @@ class Signature:
                     for yara_block in block[keyword]:
                         if re.findall(name, yara_block["name"], re.I):
                             # we can't use here values from set_path
-                            yield "sample", block["path"], yara_block, block
+                            yield "sample", os.path.join(analysis_folder, "selfextracted", block["sha256"]), yara_block, block
 
         for block in self.results.get("CAPE", {}).get("payloads", []) or []:
             for sub_keyword in ("cape_yara", "yara"):
@@ -812,7 +851,7 @@ class Signature:
                 for keyword in ("cape_yara", "yara"):
                     for yara_block in subblock[keyword]:
                         if re.findall(name, yara_block["name"], re.I):
-                            yield "sample", subblock["path"], yara_block, block
+                            yield "sample", os.path.join(analysis_folder, "selfextracted", block["sha256"]), yara_block, block
 
         for keyword in ("procdump", "procmemory", "extracted", "dropped"):
             if self.results.get(keyword) is not None:
@@ -835,7 +874,9 @@ class Signature:
                         for keyword in ("cape_yara", "yara"):
                             for yara_block in subblock[keyword]:
                                 if re.findall(name, yara_block["name"], re.I):
-                                    yield "sample", subblock["path"], yara_block, block
+                                    yield "sample", os.path.join(
+                                        analysis_folder, "selfextracted", subblock["sha256"]
+                                    ), yara_block, block
 
         macro_path = os.path.join(CUCKOO_ROOT, "storage", "analyses", str(self.results["info"]["id"]), "macros")
         for macroname in self.results.get("static", {}).get("office", {}).get("Macro", {}).get("info", []) or []:
@@ -1480,6 +1521,13 @@ class Signature:
             return self._current_call_raw_dict[name]
 
         return None
+    
+    def get_all_sids(self):
+        sids = set()
+        if isinstance(self.results.get("suricata", {}), dict):
+            for alert in self.results.get("suricata", {}).get("alerts", []):
+                sids.add(alert.get("sid", 0))
+        return sids
 
     def check_suricata_alerts(self, pattern, blacklist=None):
         """Check for pattern in Suricata alert signature
@@ -1498,6 +1546,62 @@ class Signature:
                     res = True
                     break
         return res
+
+    def get_suricata_sids(self):
+        sids_ips = {}
+        for alert in self.results.get("suricata", {}).get("alerts", []):
+            sid = alert.get("sid",0)
+            src_ip = alert.get("srcip")
+            dst_ip = alert.get("dstip")
+            domains = self.results["network"].get("domains")
+            #domain_list = []
+            #for domain in self.results.get("domains",{}):
+            #    if domain['ip'] in [src_ip,dst_ip]:
+            #        domain_list.append(domain['domain'])
+            url = "" #NEED TO ADD THIS
+            ips_for_sid = sids_ips.get(sid, [])
+            ips_for_sid.append((src_ip, dst_ip, domains, url))
+            sids_ips[sid] = ips_for_sid
+        return sids_ips
+
+    def on_complete_suricata(self):
+        sids_ips = self.get_suricata_sids()
+        has_results = False
+
+        for server_sid in self._server_sids:
+            for server_ip, _, domain, url in sids_ips.get(server_sid, []):
+                # matched a C&C server
+                #print(server_sid)
+                #LOG.info('%s/%s C&C Server Identified!' % (self._malware_type, self._malware_family) )
+                # TODO/AH: pointless right now since we can't safely and correctly match to Cuckoo's mapping of fields
+                # extraction was done based on Suricata eve.json hierarchy but Cuckoo maps it differently and
+                # it's hard to certainly say which flow/hostname/url are involved without risking FPs.
+                self.mark_ioc('ip', server_ip, description=json.dumps({'domain':domain, 'url':url}))
+                self.mark_ioc('ati_malware_type', self._malware_type)
+                self.mark_ioc('ati_malware_family', self._malware_family)
+                has_results = True
+                self.mark_config({
+                    "family": self._malware_family,
+                    "cnc": "%s" %(server_ip),
+                    "type": self._malware_type,
+                    "domains":domain
+                    })
+
+        for client_sid in self._client_sids:
+            for _, _, _, _ in sids_ips.get(client_sid, []):
+                # no C&C server but we did the check-in so mark the binary
+                #print(client_sid)
+                #LOG.info('%s/%s Binary Identified!' % (self._malware_type, self._malware_family) )
+                self.mark_ioc('ati_malware_type', self._malware_type)
+                self.mark_ioc('ati_malware_family', self._malware_family)
+                has_results = True
+                self.mark_config({
+                    "family": self._malware_family,
+                    "type": self._malware_type
+                    })
+
+
+        return has_results
 
     def mark_call(self, *args, **kwargs):
         """Mark the current call as explanation as to why this signature matched."""
@@ -1544,14 +1648,18 @@ class Signature:
         @param process: process doing API call.
         @raise NotImplementedError: this method is abstract.
         """
+        if self.on_call_dispatch:
+           return getattr(self, "on_call_%s" % call["api"])(call, process)
 
         raise NotImplementedError
+
 
     def on_complete(self):
         """Evented signature is notified when all API calls are done.
         @return: Match state.
         @raise NotImplementedError: this method is abstract.
         """
+
         raise NotImplementedError
 
     def run(self):
@@ -1565,19 +1673,46 @@ class Signature:
         """Properties as a dict (for results).
         @return: result dictionary.
         """
-        return dict(
-            name=self.name,
-            description=self.description,
-            severity=self.severity,
-            weight=self.weight,
-            confidence=self.confidence,
-            references=self.references,
-            data=self.data,
-            new_data=self.new_data,
-            alert=self.alert,
-            families=self.families,
-        )
+        # Create ttp urls to append to the results json
+        ttp_urls = []
+        try:
+            if self.ati_ttps and self.description.startswith("ATI"):
+                self.description += " | MITRE ATT&CK Technique IDs: "
+                for t in self.ati_ttps:
+                    ttp_urls.append( "https://attack.mitre.org/techniques/" + t + "/" )
+                    self.description += t + ", "     
+            return dict(
+                name=self.name,
+                description=self.description,
+                severity=self.severity,
+                weight=self.weight,
+                confidence=self.confidence,
+                references=self.references,
+                data=self.data,
+                new_data=self.new_data,
+                alert=self.alert,
+                families=self.families,
+            )
+        except:
+            pass
 
+    def mark_config(self, config):
+        """Mark configuration from this malware family."""
+        if not isinstance(config, dict) or "family" not in config:
+            raise CuckooCriticalError("Invalid call to mark_config().")
+
+        self.data.append({
+                           "type": "config",
+                           "config": config,
+                           })
+
+    def mark(self, **kwargs):
+        """Mark arbitrary data."""
+        mark = {
+                "type": "generic",
+                }
+        mark.update(kwargs)
+        self.data.append(mark)
 
 class Report:
     """Base abstract class for reporting module."""
@@ -1724,3 +1859,5 @@ class ProtocolHandler:
 
     def handle(self):
         raise NotImplementedError
+
+

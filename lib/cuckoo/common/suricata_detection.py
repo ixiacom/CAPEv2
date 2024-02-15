@@ -78,7 +78,7 @@ suricata_blocklist = (
     "suspicious",
 )
 
-et_categories = ("ET TROJAN", "ETPRO TROJAN", "ET MALWARE", "ETPRO MALWARE", "ET CNC", "ETPRO CNC")
+et_categories = ("ET TROJAN", "ETPRO TROJAN", "ET MALWARE", "ETPRO MALWARE", "ET CNC", "ETPRO CNC","ATI Malware")
 
 
 def get_suricata_family(signature):
@@ -92,6 +92,9 @@ def get_suricata_family(signature):
     family = False
     words = re.findall(r"[A-Za-z0-9/\-]+", signature)
     famcheck = words[2]
+    if signature.startswith('ATI Malware'):
+        family = signature.split(' ')[2]
+        return family
     if "/" in famcheck:
         famcheck_list = famcheck.split("/")  # [-1]
         for fam_name in famcheck_list:
